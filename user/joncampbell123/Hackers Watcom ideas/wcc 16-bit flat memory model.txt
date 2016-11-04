@@ -1,0 +1,102 @@
+Ideas for Hackers' Watcom:
+
+- 16-bit flat memory model (give wcc a -mf switch).
+
+  This would compile code that assumes a .COM memory model.
+
+  DS = CS, therefore the code can always refer to data either
+  by assuming DS = CS, by using CS: prefix when addressing
+  memory, or (if forced by __loadds) add PUSH CS / POP DS
+  to the prologue of the function.
+
+  If wcc is also compiled with the switch to specify that
+  SS is pegged to DGROUP (and therefore SS = CS), then
+  the compiler can also refer to data on the stack the
+  same way.
+
+  Proposal:
+
+  * alongside the small (-ms), compact (-mc), medium (-mm),
+    large (-ml), and huge (-mh) models, add a flat (-mf)
+    option.
+
+  * if DS is pegged to DGROUP (-zdp), then code can assume
+    DS = CS and avoid reloading the DS register unless
+    necessary. If loading DS is needed, the code can generate
+    PUSH CS / POP DS instructions when necessary, or for
+    one-off memory references use the CS: segment override.
+
+  * if DS is NOT pegged to DGROUP (-zdf), then all functions
+    reload DS when needed with PUSH CS / POP DS, or refer to
+    data using CS: segment override.
+
+  * if SS = DGROUP, then the code can assume SS = DS = CS
+    (or reload DS if necessary), and refer to stack variables
+    through the DS segment, or use CS: segment override.
+
+  * to allow existing code that uses SEG references to
+    compile, such as "MOV AX,SEG symbol", the compiler and
+    assembler could assemble the instruction instead as
+    "MOV AX,CS" to satisfy the programmer's intent.
+ 
+    if the symbol is on the stack, and SS != DGROUP, then
+    it could be assembled instead as "MOV AX,SS".
+
+  * the linker would be updated to merge all segments into
+    one 64KB segment. all relocations would be resolved at
+    link time, if possible, or else linking fails. since
+    .COM executables lack relocations and do not know where
+    they will be loaded, segment value relocations cannot
+    be applied. The link must fail if the image (origin + size)
+    exceeds 64KB - 1 bytes.
+
+  * the linker would be updated to accept an origin option
+    specifying the offset in the 64KB segment that the code
+    will be loaded. The "com" system target would default
+    to an origin of 0x100, and the "rawbin" system target
+    would default to an origin of 0. The link must fail if
+    (origin + size) exceeds 64KB - 1 bytes.
+
+  * the linker's default segment ordering would place
+    code first, then const, then data, then end with stack.
+    the user is free to override this order, however the
+    linker must print a warning if the code segment does
+    not come first since the entry point of a .COM executable
+    is the first byte of the file.
+
+  Advantages:
+
+  * Easier to target and generate software in flat 16-bit
+    memory models like .COM executables, MS-DOS device
+    drivers (not using the EXE format).
+
+  * Might allow custom startup code or a variant of the
+    C library that does not need the CSTARTUP.OBJ file
+    to target .COM format.
+
+  * Code generated in this model executes correctly without
+    knowing the segment register or base ahead of time.
+    Can be loaded into any 64KB segment and executed.
+    No relocation table required.
+
+  Disadvantages:
+
+  * Watcom linker cannot provide relocations for segment
+    references. It cannot provide for C or assembly language
+    code like "MOV AX,SEG _some_symbol" because it doesn't
+    know what the segment register will be at runtime.
+
+    Dumb idea: The linker, if it knows that the symbol is
+               in the same 64KB segment, could patch the
+               instruction, converting "MOV AX,SEG ..."
+               into "MOV AX,CS" and NOP-pad the remainder
+               of the original instruction.
+
+  * Code, data, and stack plus origin of image cannot
+    exceed 64KB.
+
+  * Memory references, especially if it is indicated that
+    DS is not pegged to DGROUP, must be either prefixed by
+    code to reload DS or must use the CS: segment register
+    override, neither of which is good for performance.
+

@@ -1,0 +1,247 @@
+Ideas for Hackers' Watcom:
+
+- 386 flat real mode extensions to 16-bit compiler.
+
+  A special prefix could be added to the 'long' and 'long long'
+  data types to instruct the compiler to use 32-bit instructions
+  from 16-bit mode when operating on the datatype.
+
+  Another special prefix could be added to near and far pointers
+  to make the offset field of the pointer 32 bits wide instead
+  of 16, to access memory beyond the 64KB limit of a segment as
+  permitted by 386 32-bit address encoding and flat real mode.
+  The 32-bit near pointer could be used to reach into extended
+  memory from real mode.
+
+  Proposal:
+
+  * A prefix (I suggest __flat386) can be prepended to unsigned long
+    and unsigned long long variables to indicate to the compiler
+    that the 32-bit long value should be accessed from 16-bit code
+    using 32-bit opcode overrides.
+
+    normal 16-bit code, unsigned long:
+
+    code:                          asm:
+    -----------------------------+-------------------------
+    unsigned long x;
+    
+    x = 0x12345678UL               MOV WORD PTR [X+0],0x5678
+                                   MOV WORD PTR [X+2],0x1234
+    x += 0x11111111UL              ADD WORD PTR [X+0],0x1111
+                                   ADC WORD PTR [X+2],0x1111
+
+    16-bit code using __flat386, unsigned long:
+
+    code:                          asm:
+    -----------------------------+-------------------------
+    unsigned long __flat386 x;
+    
+    x = 0x12345678UL               MOV DWORD PTR [X+0],0x12345678   ; <- using 32-bit operand override prefix
+    x += 0x11111111UL              ADD DWORD PTR [X+0],0x11111111   ; <- using 32-bit operand override prefix
+
+  * Typecasting with __flat386 also enables the behavior
+
+    code:                          asm:
+    -----------------------------+-------------------------
+    unsigned long x;
+    
+    x = 0x12345678UL               MOV WORD PTR [X+0],0x5678
+                                   MOV WORD PTR [X+2],0x1234
+
+    *((unsigned long*)(&x)) += 0x11111111UL
+                                   MOV SI,OFFSET X                  ; <- 16-bit assign address of X to SI
+                                   ADD WORD PTR [SI],0x1111         ; <- 16-bit normal 32-bit addition
+                                   ADC WORD PTR [SI+2],0x1111
+
+    *((unsigned long __flat386*)(&x)) += 0x11111111UL
+                                   MOV SI,OFFSET X                  ; <- 16-bit assign address of X to SI
+                                   ADD DWORD PTR [SI],0x11111111    ; <- 32-bit operand override using 16-bit addressing [SI]
+
+  * Near and far pointers can use __flat386 to use 32-bit addressing
+
+    To resolve ambiguity with __flat386 unsigned long, the __flat386 must follow the asterisk
+    in the same way that you say the pointer is const, not the data type of the pointer.
+
+    code:                          asm:
+    -----------------------------+-------------------------
+    unsigned char * ptr;           SUB SP,2                         ; <- 2-byte 16-bit word allocation, for near pointer
+    unsigned char * __flat386 ptr32; SUB SP,4                       ; <- 4-byte 32-bit word allocation, for 32-bit flat near pointer
+    unsigned char c;               SUB SP,1                         ; <- 1-byte allocation for "c"  NTS: Compilers wouldn't leave SP odd, of course!
+
+    ptr = &c;                      MOV WORD PTR [ptr],OFFSET C
+    *ptr = 0xAA;                   MOV SI,WORD PTR [ptr]
+                                   MOV BYTE PTR [SI],0xAA
+
+    ptr32 = &c;                    MOVZX DWORD PTR [ptr32],OFFSET C ; <- 32-bit opcode override, load 16-bit offset and zero extend
+    *ptr32 = 0xAA;                 MOV ESI,DWORD PTR [ptr]          ; <- 32-bit address, opcode override, to load pointer into ESI
+                                   MOV BYTE PTR [ESI],0xAA          ; <- 32-bit address override
+
+    unsigned char far * ptr;       SUB SP,4
+    unsigned char far * __flat386 ptr32; SUB SP,6                   ; <- 48-bit allocation, 32-bit offset, 16-bit segment
+    unsigned char c;               SUB SP,1
+
+    ptr = &c;                      MOV WORD PTR [ptr],OFFSET C
+                                   MOV WORD PTR [ptr+2],SEGMENT C
+    *ptr = 0xAA                    LDS SI,WORD PTR [ptr]
+                                   MOV BYTE PTR [SI],0xAA
+
+    ptr32 = &c;                    MOVZX DWORD PTR [ptr],OFFSET C
+                                   MOV WORD PTR [ptr+4],SEGMENT C
+    *ptr32 = 0xAA;                 LDS ESI,DWORD PTR [ptr]
+                                   MOV BYTE PTR [ESI],0xAA
+
+  * Compiler must not accept __flat386 unless targeting 386 or higher.
+
+    To get the __flat386 extensions, the compiler must be run with a target of a 386 or higher.
+    That means using the -3 compiler switch at minimum. If targeting a 286 or lower, the compiler
+    must print an error message stating the __flat386 extensions are not available.
+
+  * Compiler and linker are not responsible for switching on flat real mode.
+
+    To keep things simple, the compiler and linker should not be responsible for switching the CPU
+    into flat real mode. Instead, that should be managed by an external library. The job of the
+    compiler and linker for this extension is only to provide the code to execute in that environment
+    once the external library has switched on 32-bit flat real mode.
+
+  * __flat386 should not be affected by 16-bit memory model.
+
+    __flat386 should be available in the 16-bit compiler as long as it is targeting a 386 or higher,
+    regardless of the memory model.
+
+  * If the pointer is "volatile", then it is handled the same was as a normal volatile pointer.
+
+  * If a function pointer is __flat386 (after the asterisk), then the programmer intends to do a
+    function call using the 32-bit operator override, using a 32-bit offset.
+
+    code:                          asm:
+    -----------------------------+-------------------------
+    void (*funcptr)();
+    funcptr();                     CALL WORD PTR [funcptr]
+
+    void (* __flat386 funcptr)();
+    funcptr();                     o32 CALL DWORD PTR [funcptr]         ; <- NOTE! Normally "CALL DWORD PTR" means CALL FAR in some compilers/assemblers!
+                                                                        ;    Nasm-style "o32" is used here to clarify near CALL with 32-bit address/opcode override
+
+    Programmers should be aware that calling subroutines with an offset at or beyond 64KB may crash
+    if interrupts are enabled or if the flat real mode setup routine has not configured the CS register
+    with the full 4GB limit. This is due to the fact that 16-bit code is not expected to use the
+    upper 16 bits of the instruction pointer. Interrupts may corrupt the upper 16 bits of the
+    instruction pointer, or may crash when attempting to execute an interrupt handler when the upper
+    16 bits are nonzero. 32-bit code offsets in 16-bit real mode, known as huge real mode, is seldom
+    used except where the program has complete control of the system and it's state.
+
+  * If a function is declared as __flat386 (not it's return type), then the epilogue of the function should
+    use a 32-bit RET or RETF instruction (32-bit address/opcode override) instead of a normal 16-bit RET / RETF.
+    Calling these functions then follows the same rules as the __flat386 function pointer rule specified above.
+
+    FIXME: How would you declare that?
+
+  * Unsigned long parameters in a function call that are __flat386, if stored in a CPU register by calling
+    convention, should take the entire 32-bit width of a CPU register instead of multiple 16-bit registers.
+
+    unsigned long as a normal 16-bit parameter could be passed by calling convention as BX:DX, split into
+    two 16-bit registers, while
+
+    unsigned long __flat386 would be allocated to register EBX and not split in two 16-bit registers.
+
+  * __flat386 pointers, passed as a parameter to a function call, should be allocated one 32-bit register
+    instead of one 16-bit register. __flat386 far pointers should be allocated two registers, one a 32-bit
+    offset value, the other the 16-bit segment value.
+
+  * If a function pointer is __flat386 (before the asterisk), then the programmer intends the
+    function's return value to have the __flat386 type. This shall be valid ONLY for the __watcall
+    calling convention.
+
+    For optimization purposes, the compiler is allowed to do a 32-bit flat store to a non-__flat386
+    unsigned long variable if the source is a __flat386 unsigned long variable or dereferencing of a pointer.
+
+    code:                          asm:
+    -----------------------------+-------------------------
+    unsigned long (*funcptr)();
+    unsigned long a;
+
+    a = funcptr();                 CALL WORD PTR [funcptr]              ; <- 16-bit normal call. 32-bit long returned in DX:AX, two 16-bit halves
+                                   MOV WORD PTR [a],AX
+                                   MOV WORD PTR [a+2],DX
+
+    unsigned long __flat386 (*funcptr)();
+    unsigned long a;
+
+    a = funcptr();                 CALL WORD PTR [funcptr]              ; <- 16-bit normal call. the __flat386 on the return type means "unsigned long" is returned in EAX
+                                   MOV DWORD PTR [a],EAX                ; so take EAX and move it into "a"
+
+    unsigned long * __flat386 (*funcptr)();
+    unsigned long a;
+
+    a = *(funcptr());              CALL WORD PTR [funcptr]              ; <- 16-bit normal call. function returns unsigned long * pointer in EAX
+                                   MOV EAX,DWORD PTR [EAX]              ; deference __flat386 pointer
+                                   MOV DWORD PTR [a],EAX                ; we're using __flat386 anyway, why not use it to store to non-__flat386 unsigned long?
+
+  * The compiler must warn about pointer truncation when the programmer assigns a __flat386 pointer to a non-__flat386 (16-bit pointer).
+    Doing that loses the upper 16 bits of the __flat386 pointer. If the __flat386 unsigned long is typecast to normal unsigned long,
+    the same warning shall apply.
+
+  * Typecasting a value to unsigned long __flat386, even if the original value is unsigned long,
+    makes that access or reference act like a __flat386 reference.
+
+  * Interrupts may hinder or diminish flat real mode. "wcc" shall provide an option to wrap __flat386
+    memory access in groups surrounded by PUSHF / CLI ... POPF to disable interrupts during the 32-bit
+    memory address sections. The logic is then that if INT 0Dh (GPF) occurs it can be easily distinguished
+    from IRQ 5 by the fact that interrupts were disabled at the time, and the third party library can
+    be called from the exception handler to re-enable flat real mode and then resume normal execution.
+
+ Advantages:
+
+  * Flat real mode, despite the lack of utility under protected mode memory managers and virtual
+    8086 mode, is a well known hack for 32-bit x86 processors as a way to address extended memory
+    from real mode. This extension would allow 16-bit real mode DOS applications to address
+    extended memory directly from flat real mode. It would also allow 16-bit real mode code to
+    directly address peripherals that are memory-mapped within the first 4GB of processor address
+    space, if desired.
+
+  * Building it into the compiler as an optional extension would allow writing code in C to
+    address extended memory directly, instead of having to add inline assembly language to
+    do it. Watcom C's optimizer can then optimize the code for performance.
+
+  * As an optional extension it also removes the need for hacks or adjustments to call into
+    existing 16-bit code, including the existing Watcom C runtime. It can be used while compiling
+    against the existing 16-bit C runtime libraries.
+
+  * Making it an optional extension, to be used where the programmer intends it to be used, makes
+    it possible to specialize specific routines for it while retaining normal 16-bit real mode
+    code. If a programmer intends to run the program under DOS virtual 8086 mode, then he/she can
+    write the code to fallback to non flat-real-mode alternative routines if flat real mode is
+    not available. If compiled as separate OBJ files, the programmer can write a program that
+    can run on base 8088 hardware with normal 16-bit code, but then use 386 flat real mode
+    extensions when it detects 386 or higher hardware and non-v86 real mode.
+
+  * Allowing __flat386 to move data in 32-bit words or operate on unsigned long values in
+    32-bit registers can provide performance improvements to 16-bit code and eliminate the
+    need for two 16-bit operations on the 32-bit word.
+
+ Disadvantages:
+
+  * It is the responsibility of the programmer to call an external library to set up flat real
+    mode. On most x86 processors, real mode normally enforces a 64KB segment limit. Reading
+    beyond that limit can trigger a general protection fault, which DOS is not prepared to
+    handle. DOS programs using flat real mode must hook IRQ 5 (INT 0Dh) to catch GPF faults
+    in case the CPU is reverted back to 64KB segment limits without notice.
+
+    NOTES: It is known from experience that flat real mode *generally* works when running from
+           within VirtualBox, however about once every 1-2 seconds something in VirtualBox
+           appears to reset the segment register limits. A naive DOS program using flat real
+           mode will run fine for a short period of time, then suddenly hit a GPF when this
+           reset happens. A program that has a working INT 0Dh hook will catch this and
+           re-enable flat real mode to resume execution, however it does make working with
+           IRQ 5 more difficult.
+
+  * Flat real mode is only useful in true real mode. DOS protected mode managers and virtual
+    8086 mode do not give the programmer control over protected mode or segment limits and
+    therefore flat real mode is not available in those cases, nor are they available when
+    running in a VM like enviroment like a Windows "DOS" box.
+
+  * There may exist x86 clones or emulators that do not support flat real mode. These processors
+    may strictly enforce the 64KB segment limit in real mode or may lack the invisible "cached"
+    part of the segment register descriptor necessary for flat real mode to work.
+
