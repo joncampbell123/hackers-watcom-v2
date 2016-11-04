@@ -74,7 +74,7 @@ Ideas for Hackers' Watcom:
                                    MOV BYTE PTR [SI],0xAA
 
     ptr32 = &c;                    MOVZX DWORD PTR [ptr32],OFFSET C ; <- 32-bit opcode override, load 16-bit offset and zero extend
-    *ptr32 = 0xAA;                 MOV ESI,DWORD PTR [ptr]          ; <- 32-bit address, opcode override, to load pointer into ESI
+    *ptr32 = 0xAA;                 MOV ESI,DWORD PTR [ptr32]        ; <- 32-bit address, opcode override, to load pointer into ESI
                                    MOV BYTE PTR [ESI],0xAA          ; <- 32-bit address override
 
     unsigned char far * ptr;       SUB SP,4
@@ -86,9 +86,9 @@ Ideas for Hackers' Watcom:
     *ptr = 0xAA                    LDS SI,WORD PTR [ptr]
                                    MOV BYTE PTR [SI],0xAA
 
-    ptr32 = &c;                    MOVZX DWORD PTR [ptr],OFFSET C
-                                   MOV WORD PTR [ptr+4],SEGMENT C
-    *ptr32 = 0xAA;                 LDS ESI,DWORD PTR [ptr]
+    ptr32 = &c;                    MOVZX DWORD PTR [ptr32],OFFSET C
+                                   MOV WORD PTR [ptr32+4],SEGMENT C
+    *ptr32 = 0xAA;                 LDS ESI,DWORD PTR [ptr32]
                                    MOV BYTE PTR [ESI],0xAA
 
     If __flat386 preceeds the asterisk, and the data type is unsigned long or larger, then it
