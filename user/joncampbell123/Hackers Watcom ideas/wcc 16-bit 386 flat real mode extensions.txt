@@ -100,6 +100,9 @@ Ideas for Hackers' Watcom:
     unsigned long __flat386 *a = &val;                  /* 16-bit offset, to use 32-bit read */
     unsigned long __flat386 * __flat386 a = &val;       /* 32-bit offset, to use 32-bit read */
 
+    If __flat386 preceeds the asterisk, and the data type is smaller than 32-bit, then it should
+    have no effect until after the asterisk, and the compiler should print a warning stating so.
+
   * Compiler must not accept __flat386 unless targeting 386 or higher.
 
     To get the __flat386 extensions, the compiler must be run with a target of a 386 or higher.
