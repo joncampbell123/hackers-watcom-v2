@@ -257,3 +257,13 @@ Ideas for Hackers' Watcom:
     may strictly enforce the 64KB segment limit in real mode or may lack the invisible "cached"
     part of the segment register descriptor necessary for flat real mode to work.
 
+  * __flat386 use of the full 32 bits of the CPU register may have problems if interrupts or
+    system calls corrupt the upper 32 bits of the CPU register while the code is executing,
+    though this is rare from my experience. Generally if external code does use the full
+    32 bits, the external code also knows to save and restore the full 32 bits.
+
+    Cases where full 32-bit register use is unreliable:
+
+    - Older DOS VMs (such as OS/2 3.x and earlier)
+    - BIOSes that use the full 32-bit register while only saving the lower 16 bits in interrupts.
+
