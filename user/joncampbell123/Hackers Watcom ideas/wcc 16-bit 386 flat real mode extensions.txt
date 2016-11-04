@@ -91,6 +91,15 @@ Ideas for Hackers' Watcom:
     *ptr32 = 0xAA;                 LDS ESI,DWORD PTR [ptr]
                                    MOV BYTE PTR [ESI],0xAA
 
+    If __flat386 preceeds the asterisk, and the data type is unsigned long or larger, then it
+    means the pointer should be dereferenced using 32-bit wide memory access, but the pointer
+    should be 16-bit.
+
+    unsigned long val;                                  /* value to point at */
+    unsigned long * __flat386 a = &val;                 /* 32-bit offset, to use 32-bit read */
+    unsigned long __flat386 *a = &val;                  /* 16-bit offset, to use 32-bit read */
+    unsigned long __flat386 * __flat386 a = &val;       /* 32-bit offset, to use 32-bit read */
+
   * Compiler must not accept __flat386 unless targeting 386 or higher.
 
     To get the __flat386 extensions, the compiler must be run with a target of a 386 or higher.
