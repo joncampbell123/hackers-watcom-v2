@@ -39,12 +39,12 @@
 
 #include "pushpck1.h"
 typedef struct StringTableBlock {
-    WResIDName *                String[STRTABLE_STRS_PER_BLOCK];
+    WResIDName      *String[STRTABLE_STRS_PER_BLOCK];
 } StringTableBlock;
 #include "poppck.h"
 
 extern void ResInitStringTableBlock( StringTableBlock * );
 extern void ResFreeStringTableBlock( StringTableBlock * );
-extern bool ResWriteStringTableBlock( StringTableBlock * currblock, bool use_unicode, WResFileID handle );
+extern bool ResWriteStringTableBlock( StringTableBlock * currblock, bool use_unicode, WResFileID fid );
 
 #endif

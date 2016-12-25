@@ -50,36 +50,17 @@
 #include "wreslang.h"
 #include "rcrtns.h"
 #include "wresset2.h"
+#include "wressetr.h"
 
 #include "clibext.h"
+
 
 #define NO_RES_MESSAGE "could not open message resource file"
 
 static  HANDLE_INFO     hInstance = { 0 };
 static  unsigned        MsgShift;
-static  bool            res_failure = true;
 
 static void Msg_Add_Arg( MSG_ARG *arginfo, char typech, va_list *args );
-
-static WResFileOffset res_seek( WResFileID handle, WResFileOffset position, int where )
-/*************************************************************************************/
-{
-    if( ( where == SEEK_SET ) && ( handle == hInstance.handle ) ) {
-        return( lseek( handle, position + WResFileShift, where ) - WResFileShift );
-    } else {
-        return( lseek( handle, position, where ) );
-    }
-}
-
-#ifdef _WIN64
-#define posix_read      __w64_read
-#define posix_write     __w64_write
-#else
-#define posix_read      read
-#define posix_write     write
-#endif
-
-WResSetRtns( open, close, posix_read, posix_write, res_seek, tell, RCALLOC, RCFREE );
 
 bool InitMsg( void )
 {
@@ -90,7 +71,6 @@ bool InitMsg( void )
     char        *imageName;
 #endif
 
-    hInstance.handle = NIL_HANDLE;
 #if defined( IDE_PGM )
     _cmdname( imageName );
 #elif !defined( __WATCOMC__ )
@@ -99,25 +79,21 @@ bool InitMsg( void )
     imageName = _LpDllName;;
 #endif
     BannerPrinted = false;
-    if( !OpenResFile( &hInstance, imageName ) ) {
-        res_failure = false;
-        if( !FindResources( &hInstance ) && !InitResources( &hInstance ) ) {
-            MsgShift = _WResLanguage() * MSG_LANG_SPACING;
-            if( Msg_Get( MSG_GENERAL_HELP_0, msg_buff ) ) {
-                return( true );
-            }
+    hInstance.status = 0;
+    if( OpenResFile( &hInstance, imageName ) ) {
+        MsgShift = _WResLanguage() * MSG_LANG_SPACING;
+        if( Msg_Get( MSG_GENERAL_HELP_0, msg_buff ) ) {
+            return( true );
         }
-        CloseResFile( &hInstance );
-        hInstance.handle = NIL_HANDLE;
     }
+    CloseResFile( &hInstance );
     WriteStdOutInfo( NO_RES_MESSAGE, ERR, NULL );
-    res_failure = true;
     return( false );
 }
 
 bool Msg_Get( int resourceid, char *buffer )
 {
-    if( res_failure || WResLoadString( &hInstance, resourceid + MsgShift, (LPSTR)buffer, RESOURCE_MAX_SIZE ) <= 0 ) {
+    if( hInstance.status == 0 || WResLoadString( &hInstance, resourceid + MsgShift, (lpstr)buffer, RESOURCE_MAX_SIZE ) <= 0 ) {
         buffer[0] = '\0';
         return( false );
     }
@@ -180,10 +156,10 @@ static void Msg_Add_Arg( MSG_ARG *arginfo, char typech, va_list *args )
         break;
     case 'x':
     case 'd':
-        arginfo->int_16 = va_arg( *args, unsigned int );
+        arginfo->int_16 = (signed_16)va_arg( *args, unsigned int );
         break;
     case 'l':
-        arginfo->int_32 = va_arg( *args, unsigned long );
+        arginfo->int_32 = (signed_32)va_arg( *args, unsigned long );
         break;
     case 'A':
     case 'a':
@@ -208,13 +184,87 @@ void Msg_Write_Map( int resourceid, ... )
 
 bool FiniMsg( void )
 {
-    bool    retcode = true;
+    return( CloseResFile( &hInstance ) );
+}
 
-    if( !res_failure ) {
-        if( CloseResFile( &hInstance ) ) {
-            res_failure = true;
-            retcode = false;
+WResFileID  res_open( const char *name, wres_open_mode omode )
+{
+    switch( omode ) {
+    default:
+    case WRES_OPEN_RO:
+        return( WRES_PH2FID( open( name, O_BINARY | O_RDONLY ) ) );
+        break;
+    case WRES_OPEN_RW:
+        return( WRES_PH2FID( open( name, O_BINARY | O_RDWR | O_CREAT, PMODE_RW ) ) );
+        break;
+    case WRES_OPEN_NEW:
+        return( WRES_PH2FID( open( name, O_BINARY | O_WRONLY | O_CREAT | O_TRUNC, PMODE_RW ) ) );
+        break;
+    }
+}
+
+int  res_close( WResFileID fid )
+{
+    return( close( WRES_FID2PH( fid ) ) );
+}
+
+WResFileSSize  res_read( WResFileID fid, void *buf, WResFileSize len )
+{
+    return( posix_read( WRES_FID2PH( fid ), buf, len ) );
+}
+
+WResFileSSize  res_write( WResFileID fid, const void *buf, WResFileSize len )
+{
+    fid = fid;
+    WriteLoad( buf, len );
+    return( len );
+}
+
+WResFileOffset res_seek( WResFileID fid, WResFileOffset amount, int where )
+{
+    if( fid == hInstance.fid ) {
+        if( where == SEEK_SET ) {
+            return( lseek( WRES_FID2PH( fid ), amount + WResFileShift, where ) - WResFileShift );
+        } else {
+            return( lseek( WRES_FID2PH( fid ), amount, where ) );
         }
     }
-    return( retcode );
+
+    DbgAssert( where != SEEK_END );
+    DbgAssert( !(where == SEEK_CUR && amount < 0) );
+
+    if( WRES_FID2PH( fid ) == Root->outfile->handle ) {
+        if( where == SEEK_CUR ) {
+            unsigned long   old_pos;
+            unsigned long   new_pos;
+
+            old_pos = PosLoad();
+            new_pos = old_pos + amount;
+            if( new_pos > old_pos ) {
+                PadLoad( (size_t)amount );
+            } else {
+                SeekLoad( new_pos );
+            }
+            return( new_pos );
+        } else {
+            SeekLoad( amount );
+            return( amount );
+        }
+    } else {
+        return( QLSeek( WRES_FID2PH( fid ), amount, where, "resource file" ) );
+    }
 }
+
+WResFileOffset res_tell( WResFileID fid )
+{
+    if( fid == hInstance.fid ) {
+        return( tell( WRES_FID2PH( fid ) ) );
+    }
+
+    DbgAssert( WRES_FID2PH( fid ) == Root->outfile->handle );
+
+    fid = fid;
+    return( PosLoad() );
+}
+
+WResSetRtns(res_open,res_close,res_read,res_write,res_seek,res_tell,ChkLAlloc,LFree);

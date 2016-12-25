@@ -285,6 +285,7 @@ static unsigned DoRun( bool step )
         conditions = MakeAsyncRun( step );
         if( conditions & COND_RUNNING ) {
             conditions = DUIDlgAsyncRun();
+            ReadDbgRegs();
         }
     } else {
         conditions = MakeProgRun( step );
@@ -403,6 +404,9 @@ unsigned ExecProg( bool tracing, bool do_flip, bool want_wps )
         }
         conditions = CheckBPs( conditions, run_conditions );
         if( _IsOn( SW_BREAK_ON_DEBUG_MESSAGE ) && ( conditions & COND_MESSAGE ) ) {
+            conditions |= COND_STOP;
+        }
+        if( HaveRemoteAsync() && (conditions & COND_THREAD ) ) {
             conditions |= COND_STOP;
         }
         if( how == MTRH_STEPBREAK && (conditions & COND_BREAK) && DbgTmpBrk.status.b.hit ) {

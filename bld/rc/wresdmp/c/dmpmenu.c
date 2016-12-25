@@ -38,6 +38,9 @@
 #include "dmpmenu.h"
 #include "rcrtns.h"
 
+#include "clibext.h"
+
+
 static char * MenuOnFlags[16] = {
     "GRAYED",       /* 0x0001 */
     "INACTIVE",     /* 0x0002 */
@@ -100,8 +103,8 @@ static void PrintHeader( MenuHeader * head )
                 head->HeaderSize );
 }
 
-bool DumpMenu( uint_32 offset, uint_32 length, WResFileID handle )
-/****************************************************************/
+bool DumpMenu( uint_32 offset, uint_32 length, WResFileID fid )
+/*************************************************************/
 {
     bool            error;
     WResFileOffset  prevpos;
@@ -110,11 +113,11 @@ bool DumpMenu( uint_32 offset, uint_32 length, WResFileID handle )
     MenuHeader      head;
 
     length = length;
-    prevpos = RCSEEK( handle, offset, SEEK_SET );
+    prevpos = RCSEEK( fid, offset, SEEK_SET );
     error = (prevpos == -1);
 
     if( !error ) {
-        error = ResReadMenuHeader( &head, handle );
+        error = ResReadMenuHeader( &head, fid );
     }
     if( !error ) {
         PrintHeader( &head );
@@ -123,7 +126,7 @@ bool DumpMenu( uint_32 offset, uint_32 length, WResFileID handle )
     depth = 1;
     while( depth > 0 && !error ) {
         item = ResNewMenuItem();
-        error = ResReadMenuItem( item, handle );
+        error = ResReadMenuItem( item, fid );
         if( !error ) {
             if( item->IsPopup ) {
                 depth++;
@@ -141,7 +144,7 @@ bool DumpMenu( uint_32 offset, uint_32 length, WResFileID handle )
         ResFreeMenuItem( item );
     }
 
-    RCSEEK( handle, prevpos, SEEK_SET );
+    RCSEEK( fid, prevpos, SEEK_SET );
 
     return( error );
 }
